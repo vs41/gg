@@ -73,7 +73,8 @@
   </div>
 
   <script>
-    const myId = crypto.randomUUID(); // Unique ID per user
+  const myId = `user-${Date.now()}`;
+ // Unique ID per user
     const socket = new WebSocket("ws://192.168.1.20:8022/ws"); // Replace with your server IP
 
     const statusDiv = document.getElementById("status");

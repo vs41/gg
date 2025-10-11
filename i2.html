@@ -17,7 +17,8 @@
     const socket = new WebSocket(`ws://192.168.1.20:8001`);
     const peers = {};
     let localStream = null;
-    const myId = crypto.randomUUID();
+   const myId = `user-${Date.now()}`;
+
 
     document.getElementById("status").innerText = "🎤 Your ID: " + myId;
 
