@@ -85,10 +85,10 @@ func main() {
 	tlsKey := "key.pem"
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "10000"
+		port = "8080"
 	}
 
-	if err := app.ListenTLS("https://127.0.0.1:"+port, tlsCert, tlsKey); err != nil {
+	if err := app.ListenTLS(":"+port, tlsCert, tlsKey); err != nil {
 		log.Errorf("Failed to start Fiber server: %v", err)
 	}
 }
