@@ -2,87 +2,180 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>WebRTC Audio Only</title>
+    <title>WebRTC Audio Only Demo</title>
+    <style>
+      body { font-family: sans-serif; margin: 20px; }
+      audio { display: block; margin-bottom: 10px; }
+      .remote-audio-item { margin-bottom: 20px; }
+      #logs { background: #f5f5f5; padding: 10px; border: 1px solid #ccc; height: 200px; overflow-y: auto; }
+    </style>
   </head>
   <body>
-    <h3>Local Audio</h3>
-    <audio id="localAudio" autoplay muted controls></audio> <br />
+    <main>
+      <h2>WebRTC Audio Only Demo</h2>
 
-    <h3>Remote Audio</h3>
-    <div id="remoteAudios"></div> <br />
+      <section>
+        <h3>Local Audio</h3>
+        <audio id="localAudio" autoplay muted controls></audio>
+      </section>
 
-    <h3>Logs</h3>
-    <div id="logs"></div>
+      <section>
+        <h3>Remote Audio</h3>
+        <div id="remoteAudios"></div>
+      </section>
+
+      <section>
+        <h3>Logs</h3>
+        <div id="logs"></div>
+      </section>
+    </main>
 
     <script>
+      const log = (msg) => {
+        console.log(msg);
+        const div = document.getElementById("logs");
+        div.innerHTML += msg + "<br>";
+        div.scrollTop = div.scrollHeight;
+      };
+
+      // 🔹 Extract username from WebSocket URL
+      const wsURL = "{{.}}";
+      const urlParams = new URLSearchParams(wsURL.split('?')[1]);
+      const currentUsername = urlParams.get('username') || "Unknown";
+      log("Your username: " + currentUsername);
+
+      const remoteUsers = {};          // track.id -> {element, label}
+      const pendingNames = new Set();  // usernames waiting for a track
+
       navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(stream => {
-        // Local audio
-        document.getElementById('localAudio').srcObject = stream;
+        .then(stream => {
+          document.getElementById("localAudio").srcObject = stream;
 
-        let pc = new RTCPeerConnection();
+          const pc = new RTCPeerConnection();
 
-        // Add local audio tracks
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+          // Add local audio
+          stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-        // Handle remote audio tracks
-        pc.ontrack = function(event) {
-          if (event.track.kind !== 'audio') return;
+          // When remote tracks arrive
+          pc.ontrack = (event) => {
+            if (event.track.kind !== "audio") return;
+            const el = document.createElement("audio");
+            el.srcObject = event.streams[0];
+            el.autoplay = true;
+            el.controls = true;
 
-          let el = document.createElement('audio');
-          el.srcObject = event.streams[0];
-          el.autoplay = true;
-          el.controls = true;
+            const container = document.createElement("div");
+            container.className = "remote-audio-item";
 
-          document.getElementById('remoteAudios').appendChild(el);
+            const nameLabel = document.createElement("p");
+            nameLabel.textContent = "🎤 Unknown user";
+            nameLabel.style.fontWeight = "bold";
 
-          // Remove element when track removed
-          event.streams[0].onremovetrack = ({track}) => {
-            if (el.parentNode) el.parentNode.removeChild(el);
+            container.appendChild(nameLabel);
+            container.appendChild(el);
+            document.getElementById("remoteAudios").appendChild(container);
+
+            remoteUsers[event.track.id] = { element: container, nameLabel };
+            log(`🎧 New remote track added (id: ${event.track.id})`);
+
+            // If we have pending names, assign them now
+            if (pendingNames.size > 0) {
+              const nextName = pendingNames.values().next().value;
+              pendingNames.delete(nextName);
+              nameLabel.textContent = `🎤 ${nextName}`;
+              log(`✅ Assigned queued name ${nextName} to new track`);
+            }
+
+            event.streams[0].onremovetrack = ({ track }) => {
+              if (container.parentNode) container.parentNode.removeChild(container);
+              delete remoteUsers[track.id];
+            };
           };
-        };
 
-        // WebSocket connection
-        let ws = new WebSocket("{{.}}");
+          // Connect WebSocket
+          const ws = new WebSocket(wsURL);
 
-        pc.onicecandidate = e => {
-          if (!e.candidate) return;
-          ws.send(JSON.stringify({event: 'candidate', data: JSON.stringify(e.candidate)}));
-        };
+          ws.onopen = () => log("WebSocket connected ✅");
+          ws.onclose = () => log("WebSocket disconnected ❌");
+          ws.onerror = (evt) => log("WebSocket error: " + evt.data);
 
-        ws.onclose = function(evt) {
-          window.alert("WebSocket has closed");
-        };
+          // ICE candidate handler
+          pc.onicecandidate = (e) => {
+            if (e.candidate && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                event: "candidate",
+                data: JSON.stringify(e.candidate)
+              }));
+            }
+          };
 
-        ws.onmessage = function(evt) {
-          let msg = JSON.parse(evt.data);
-          if (!msg) return console.log('failed to parse msg');
+          ws.onmessage = (evt) => {
+            let msg;
+            try {
+              msg = JSON.parse(evt.data);
+            } catch (err) {
+              return log("Failed to parse message: " + evt.data);
+            }
 
-          switch (msg.event) {
-            case 'offer':
-              let offer = JSON.parse(msg.data);
-              pc.setRemoteDescription(offer);
-              pc.createAnswer().then(answer => {
-                pc.setLocalDescription(answer);
-                ws.send(JSON.stringify({event: 'answer', data: JSON.stringify(answer)}));
-              });
-              break;
+            switch (msg.event) {
+              case "offer": {
+                const offer = JSON.parse(msg.data);
+                const username = msg.user || "Unknown";
+                log(`📨 Received offer from ${username}`);
+                console.log("currentUsername", currentUsername, "username", username);
 
-            case 'candidate':
-              let candidate = JSON.parse(msg.data);
-              pc.addIceCandidate(candidate);
-              break;
+                if (username === currentUsername) {
+                  log("↩️ Offer is from yourself — skipping label update");
+                } else {
+                  // Label remote audio or queue username if no track yet
+                  let labeled = false;
+                  for (const trackId in remoteUsers) {
+                    const user = remoteUsers[trackId];
+                    if (user.nameLabel.textContent === "🎤 Unknown user") {
+                      user.nameLabel.textContent = `🎤 ${username}`;
+                      labeled = true;
+                      log(`✅ Labeled remote track as ${username}`);
+                      break;
+                    }
+                  }
 
-            default:
-              console.log('Unknown event:', msg.event);
-          }
-        };
+                  if (!labeled) {
+                    pendingNames.add(username);
+                    log(`🕓 No available track for ${username}, queued name`);
+                  }
+                }
 
-        ws.onerror = function(evt) {
-          console.log("WebSocket ERROR: " + evt.data);
-        };
-      })
-      .catch(err => window.alert("getUserMedia error: " + err));
+                pc.setRemoteDescription(offer)
+                  .then(() => pc.createAnswer())
+                  .then(answer => {
+                    pc.setLocalDescription(answer);
+                    if (ws.readyState === WebSocket.OPEN) {
+                      ws.send(JSON.stringify({
+                        event: "answer",
+                        data: JSON.stringify(answer)
+                      }));
+                    }
+                    log(`✅ Sent answer to ${username}`);
+                  })
+                  .catch(err => log("Error handling offer: " + err));
+                break;
+              }
+
+              case "candidate": {
+                const candidate = JSON.parse(msg.data);
+                pc.addIceCandidate(candidate).catch(err => log("ICE add error: " + err));
+                break;
+              }
+
+              default:
+                log("Unknown event: " + msg.event);
+            }
+          };
+        })
+        .catch(err => {
+          alert("Microphone error: " + err);
+          log("Microphone error: " + err);
+        });
     </script>
-</body>
+  </body>
 </html>
