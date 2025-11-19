@@ -53,7 +53,14 @@ func main() {
 	})
 
 	// WebSocket handler
-	app.Get("/websocket", websocket.New(sever.WebsocketHandler()))
+	app.Get("/websocket", websocket.New(sever.WebsocketHandler(), websocket.Config{
+		// Required when behind reverse proxies (Render, Railway, Heroku...)
+		EnableCompression: true,
+
+		// Optional but recommended
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+	}))
 
 	// Periodically request keyframes
 	go func() {
@@ -62,17 +69,17 @@ func main() {
 		}
 	}()
 
-	tlsCert := "cert.pem"
-	tlsKey := "key.pem"
+	// tlsCert := "cert.pem"
+	// tlsKey := "key.pem"
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	if err := app.ListenTLS(":"+port, tlsCert, tlsKey); err != nil {
-		log.Errorf("Failed to start Fiber server: %v", err)
-	}
-	// if err := app.Listen(":" + port); err != nil {
+	// if err := app.ListenTLS(":"+port, tlsCert, tlsKey); err != nil {
 	// 	log.Errorf("Failed to start Fiber server: %v", err)
 	// }
+	if err := app.Listen(":" + port); err != nil {
+		log.Errorf("Failed to start Fiber server: %v", err)
+	}
 }
