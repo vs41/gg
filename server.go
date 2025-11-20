@@ -8,8 +8,8 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
-	"strconv"
 	"text/template"
 	"time"
 	"webrtc/sever"
@@ -39,10 +39,9 @@ func main() {
 		gameID := c.Query("gameID")
 		teamID := c.Query("teamID")
 		username := c.Query("username")
-		unitID := c.Query("unitID")
 
-		wsURL := "wss://" + c.Hostname() + "/websocket?gameID=" + gameID + "&teamID=" + teamID + "&username=" + username + "&unitID=" + unitID + "&radioRange=" + strconv.Itoa(28)
-
+		wsURL := "ws://" + c.Hostname() + "/websocket?gameID=" + gameID + "&teamID=" + teamID + "&username=" + username
+		fmt.Println(wsURL)
 		var buf bytes.Buffer
 		if err := indexTemplate.Execute(&buf, wsURL); err != nil {
 			return err
@@ -53,14 +52,7 @@ func main() {
 	})
 
 	// WebSocket handler
-	app.Get("/websocket", websocket.New(sever.WebsocketHandler(), websocket.Config{
-		// Required when behind reverse proxies (Render, Railway, Heroku...)
-		EnableCompression: true,
-
-		// Optional but recommended
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-	}))
+	app.Get("/websocket", websocket.New(sever.WebsocketHandler))
 
 	// Periodically request keyframes
 	go func() {
@@ -76,10 +68,10 @@ func main() {
 		port = "8080"
 	}
 
-	// if err := app.ListenTLS(":"+port, tlsCert, tlsKey); err != nil {
-	// 	log.Errorf("Failed to start Fiber server: %v", err)
-	// }
 	if err := app.Listen(":" + port); err != nil {
 		log.Errorf("Failed to start Fiber server: %v", err)
 	}
+	// if err := app.ListenTLS(":"+port, tlsCert, tlsKey); err != nil {
+	// 	log.Errorf("Failed to start Fiber server: %v", err)
+	// }
 }
